@@ -6,7 +6,7 @@ October 2026 progress-prize submission (draft).
 
 1. **Render any public mesh in Python** (`render_surface_volume`, villa PR): builds the flat surface volume that ink inference reads straight from a public tifxyz and a public scan, fetching only the chunks the mesh touches. It reproduces the published PHerc0139 w035 9.362 µm surface volume (per-plane median r 0.993–0.9999). With `--level 2`, it turns a 2.4 µm scan directly into the 9.6 µm `ink_9um` input without first rendering a 30+ GB full-resolution surface volume (AUC 0.870 vs 0.890 for the official route on held-out PHerc0841 w00).
 2. **9 µm-class scans read worse than 2.4 µm scans, on scrolls the models never saw.** Same surface, same organiser labels, same `ink_9um` checkpoints (seed42+seed43 step-075000 ensemble). Native 8.64/9.366 µm renders score 0.055–0.105 AUC below the 2.4 µm scan pooled to 9.6 µm, on 4 of 4 segments from 2 scrolls. Interpolation and residual misregistration don't explain the gap. So a blank `ink_9um` result on a 9 µm render of an unread scroll is weak evidence of no ink.
-3. **Automatic 9 µm ↔ 2.4 µm scan registration.** Coarse axial search, then 3D phase correlation at ~19 µm, then a robust affine. On PHerc0841 it agrees with the team's own mesh transfer (published 9.366 µm and 2.403 µm meshes of segment w00) to a median of 7.7 µm along the surface normal (p90 16 µm) over 99.7 % of vertices. It writes the `foundation/volume-registration` transform JSON.
+3. **Automatic 9 µm ↔ 2.4 µm scan registration.** Coarse axial search, then 3D phase correlation at ~19 µm, then a robust affine. On PHerc0841 it agrees with the team's own mesh transfer (published 9.366 µm and 2.403 µm meshes of segment w00) to a median of 4.2 µm along the surface normal (p90 9.3 µm) over 99.7 % of vertices (7.7 µm and 16 µm before the review fix of 2026-11-01, see section 3). It writes the `foundation/volume-registration` transform JSON.
 4. **PHerc1203 (First Letters scroll), both scans.** I registered the 9.362 µm scan to the 2.403 µm partial scan, which covers about 30 mm of height. I rendered all 22 public `auto_grown` meshes, which had no surface volumes, from the 9.362 µm scan, and the parts inside the 2.4 µm band from the 2.403 µm scan. I ran `ink_9um` in both directions on all of them. No letters appear (contact sheets below). Combined with (2), the 9.362 µm renders are a weak test. The 2.4 µm-derived renders cover about 10 of the meshes substantially (12–80 % of vertices) and are the stronger negative.
 
 Prize-rule note: for PHerc1203 the eligible First Letters and 2027 Grand Prize volume is the 9.362 µm scan (20250820131727), and the Grand Prize excludes data derived from higher-resolution scans of the submitted volume. So the 2.4 µm route is a diagnostic: it tells whether a blank 9 µm result comes from the scan resolution. Prize results have to come from ink detection that works on the 9 µm-class scan itself. The four held-out pairs in (2) give one surface and one label set at both resolutions, so they can measure progress on that gap directly.
@@ -60,12 +60,21 @@ I also tested a label-free "depth profile contrast" diagnostic, meant to say whe
 2. Fine matching: 3D phase correlation of ~19 µm cubes at ~120 points, with sub-voxel peaks.
 3. Fit: iteratively reweighted least-squares affine, then one refinement pass seeded by the fit.
 
-| pair | coarse | inliers | median residual | scale vs pixel-size ratio | check against team |
+| pair | coarse | inliers | median residual (before review fix) | fitted scales, 3 axes (pixel-size ratio) | check against team (before review fix) |
 |---|---|---|---|---|---|
-| PHerc1203 9.362 ← 2.403 µm | z 1240 (L3), 0° | 38/38 | 0.87 vox (8 µm) | 0.25668 vs 0.25668 | – |
-| PHerc0841 9.366 ← 2.403 µm | z 1840 (L3), 0° | 17/22 | 1.51 vox | 0.25659 vs 0.25657 | w00 mesh: normal 7.7 µm median, 16 µm p90; in-plane 4.8 µm |
+| PHerc1203 9.362 ← 2.403 µm | z 1240 (L3), 0° | 38/38 | 0.45 vox, 4 µm (0.87 vox) | 0.25659–0.25666 (0.25668) | – |
+| PHerc0841 9.366 ← 2.403 µm | z 1840 (L3), 0° | 17/22 | 1.01 vox (1.51 vox) | 0.25647–0.25664 (0.25657) | w00 mesh: normal 4.2 µm median, 9.3 µm p90 (7.7 / 16 µm); in-plane 4.8 µm (4.8 µm) |
 
-PHerc1203, one axial plane in the middle of the 2.4 µm band: the 2.403 µm scan resampled through the automatic transform continues the sheets of the 9.362 µm scan across every checkerboard edge (pixel r 0.83 at ~19 µm).
+PHerc1203, one axial plane in the middle of the 2.4 µm band: the 2.403 µm scan resampled through the automatic transform continues the sheets of the 9.362 µm scan across every checkerboard edge (pixel r 0.955 at ~19 µm; 0.83 with the pre-review transform).
+
+### Update 2026-11-01: fixes from the review of villa #2374
+
+A review of the villa PR (https://github.com/ScrollPrize/villa/pull/2374#issuecomment-6548073654) found three problems. All three were confirmed and fixed in villa commit 94cd12c, added on top of the original 1abce22.
+1. `match_point` paired each fixed match with the unrounded moving point instead of the centre of the cube actually matched (level coordinate `c - 0.5`). That is an offset of 0 to 8 level-0 voxels per axis (mean 4), which the fit put into the translation (~1.8 voxels at 9.36 µm). It is now paired with the cube centre. The numbers above are after the fix, with the earlier ones in brackets.
+2. `transform_utils.get_volume_dimensions` failed on zarr 3. The earlier statement that this was tested on zarr 3.4.2 was wrong. After the fix, PHerc0841 was run on zarr 3.4.2 and PHerc1203 on zarr 2.18.3.
+3. A fitted scale equal to the pixel-size ratio is not a check of the registration. On PHerc0139 (2.399 → 9.362 µm) the reviewer found 0.2571, the same as the team's catalogue affine, against a pixel ratio of 0.25625.
+
+The transforms in `transforms/` and the checkerboard figure were regenerated with the fixed code. The PHerc1203 2.4 µm survey in section 4 was rendered with the pre-review transform and has not been redone.
 
 ![checkerboard of PHerc1203 9.362 um and registered 2.403 um scans](fig/pherc1203_registration_checkerboard.png)
 
@@ -73,7 +82,7 @@ PHerc1203, one axial plane in the middle of the 2.4 µm band: the 2.403 µm scan
 
 - 22 meshes from `PHerc1203/segments/raw/`, 3–16 cm² each, rendered at 9.362 µm with 28 planes.
 - `ink_9um` seed42+seed43 step-075000, both directions, 50 % overlap, Hann blending.
-- After registration, the same meshes were mapped into the 2.403 µm scan, rendered at level 2 with 21 planes, and inferred the same way.
+- After registration, the same meshes were mapped into the 2.403 µm scan, rendered at level 2 with 21 planes, and inferred the same way. (This used the pre-review transform, about 2 voxels at 9.36 µm off; see the update in section 3.)
 - Check that the mapped meshes land on the same papyrus: for the largest mesh, the 9 µm render and the 2.4 µm-derived render agree to within 1 px after canvas scaling (high-pass r 0.79).
 - Result: no letter-like rows in either set, in either direction. The images are in `fig/`.
 - PHerc0800: its 6 `auto_grown` meshes (2 cm squares, 8.64 µm only) are also blank.
